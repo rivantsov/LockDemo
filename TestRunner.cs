@@ -8,31 +8,18 @@ using System.IO;
 
 namespace LockDemo {
   public class TestRunner {
-    public ServerType ServerType; 
-    public bool UseLocks;
-    public int RepeatCount;
-    public int ThreadCount; 
     public int InconsistentReadCount = 0;
     public int DbErrorCount = 0;
 
 
-    public TestRunner(ServerType serverType, bool useLocks, int repeatCount = 100, int threadCount = 20) {
-      ServerType = serverType;
-      UseLocks = useLocks;
-      RepeatCount = repeatCount;
-      ThreadCount = threadCount; 
-    }
-
     public void RunParallelRandomOps() {
       if(!InitData())
         return; 
-      //Create 
+      //Create repository for each thread
       var tasks = new List<Task>();
-      for(int i=0; i < ThreadCount; i++) {
+      for(int i=0; i < Program.ThreadCount; i++) {
         var logFile = "sqllog_" + i + ".log";
-        if(File.Exists(logFile))
-          File.Delete(logFile); 
-        var repo = DocRepository.Create(ServerType, UseLocks, logFile);
+        var repo = CreateDocRepo(logFile);
         var task = new Task(RunRandomOps, repo);
         tasks.Add(task);
         task.Start(); 
@@ -42,7 +29,7 @@ namespace LockDemo {
 
     private bool InitData() {
       // create document headers and details
-      var repo = DocRepository.Create(ServerType, useLocks: false, logFile: "init.log");
+      var repo = CreateDocRepo("datainit.log");
       try {
         repo.Open(forUpdate: true);
         repo.DocDetailDeleteAll();
@@ -67,7 +54,7 @@ namespace LockDemo {
       var rand = new Random();
       DocHeader doc;
       int total; 
-      for(int i = 0; i < RepeatCount; i++) {
+      for(int i = 0; i < Program.RepeatCount; i++) {
         if(i % 5 == 0)
           Console.Write("."); //show progress
         Thread.Yield();
@@ -77,7 +64,7 @@ namespace LockDemo {
           switch(op) {
             case 0: //update several random detail rows
               repo.Open(forUpdate: true);
-              if(UseLocks)
+              if(Program.UseLocks)
                 doc = repo.DocHeaderLoad(docName);
               repo.DocDetailUpdate(docName, "V" + rand.Next(5), rand.Next(10));
               repo.DocDetailUpdate(docName, "V" + rand.Next(5), rand.Next(10));
@@ -104,13 +91,33 @@ namespace LockDemo {
         } catch(Exception ex) {
           //database error, most often deadlock
           Interlocked.Increment(ref DbErrorCount);
-          Console.WriteLine("\r\n--- DB error: " + ex.Message);
+          Console.WriteLine("\r\n--- DB error: " + ex.Message + " (log file: " + repo.LogFile + ")");
           repo.Log("Db error ------------------------------------------------------- \r\n" + ex.ToString() + "\r\n");
           repo.Close(error: true);
         }
       }//for i
 
     }//method
+
+    public static DocRepository CreateDocRepo(string logFile) {
+      switch(Program.ServerType) {
+        case ServerType.MsSql:
+          return new MsSqlDocRepository(Program.ConnectionString, Program.UseLocks, logFile);
+
+        case ServerType.Postgres:
+          return new PostgresDocRepository(Program.ConnectionString, Program.UseLocks, logFile);
+
+        case ServerType.MySql:
+          return new MySqlDocRepository(Program.ConnectionString, Program.UseLocks, logFile);
+
+        case ServerType.Oracle:
+          return new OracleDocRepository(Program.ConnectionString, Program.UseLocks, logFile);
+
+        default:
+          throw new NotImplementedException("Server " + Program.ServerType + " not implemented.");
+      }//switch
+    }//method
+
 
   }
 }

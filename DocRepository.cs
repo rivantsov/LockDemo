@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Data;
 using System.Data.Common;
 using System.Threading;
+using System.IO;
 
 namespace LockDemo {
 
@@ -21,47 +22,33 @@ namespace LockDemo {
   }
 
 
-  public class DocRepository {
+  public abstract class DocRepository {
+    public ServerType ServerType; 
+    public string SchemaPrefix;
     public string LogFile;
-    ServerType _serverType;
-    string _schemaPrefix;
-    string _loadHeaderWithoutLockTemplate = @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}'";
-    string _loadHeaderWithReadLockTemplate;
-    string _loadHeaderWithWriteLockTemplate;
-    protected bool _useLocks;
-    protected bool _updating; 
+    public string SqlTemplateLoadHeaderWithoutLock = @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}'";
+    public string SqlTemplateLoadHeaderWithReadLock;
+    public string SqlTemplateLoadHeaderWithWriteLock;
+    public IsolationLevel ReadIsolationLevel = IsolationLevel.Unspecified;
+    public IsolationLevel WriteIsolationLevel = IsolationLevel.Unspecified; 
+
+
     protected IDbConnection _conn;
+    protected bool _useLocks;
+
     protected IDbTransaction _trans;
+    protected bool _updating; 
     public IDbCommand LastCommand;
 
-    public static DocRepository Create(ServerType serverType, bool useLocks, string logFile) {
-      switch(serverType) {
-        case ServerType.MsSql:
-          return new MsSqlDocRepository(useLocks, logFile);
-
-        case ServerType.Postgres:
-          return new PostgresDocRepository(useLocks, logFile);
-
-        case ServerType.MySql:
-          return new MySqlDocRepository(useLocks, logFile);
-
-        case ServerType.Oracle:
-          return new OracleDocRepository(useLocks, logFile);
-
-        default:
-          throw new NotImplementedException("Server " + serverType + " not implemented.");
-      }//switch
-    }//method
-
-
-    protected DocRepository(bool useLocks, string logFile, ServerType serverType, IDbConnection conn, string schemaPrefix, string loadWithReadLockTemplate = null, string loadWithWriteLockTemplate = null) {
+    protected DocRepository(ServerType serverType, IDbConnection conn, string schemaPrefix, bool useLocks, string logFile) {
+      ServerType = serverType;
+      _conn = conn;
+      SchemaPrefix = schemaPrefix; 
       _useLocks = useLocks;
       LogFile = logFile;
-      _serverType = serverType;
-      _conn = conn;
-      _schemaPrefix = schemaPrefix;
-      _loadHeaderWithReadLockTemplate = loadWithReadLockTemplate ?? _loadHeaderWithoutLockTemplate;
-      _loadHeaderWithWriteLockTemplate = loadWithWriteLockTemplate ?? _loadHeaderWithoutLockTemplate;
+      if(File.Exists(logFile))
+        File.Delete(logFile);
+      SqlTemplateLoadHeaderWithReadLock = SqlTemplateLoadHeaderWithoutLock;
     }
 
     public virtual void Open(bool forUpdate) {
@@ -69,15 +56,10 @@ namespace LockDemo {
       _conn.Open();
       //Start transaction if we are updating data or if we use locks
       if(_updating || _useLocks) {
-        var isoLevel = GetTransactionIsolationLevel();
+        var isoLevel = _updating ? WriteIsolationLevel : ReadIsolationLevel;
         _trans = _conn.BeginTransaction(isoLevel);
         Log("\r\nBeginTransaction/{0}", isoLevel);
       }
-    }
-
-    // Might be overridden, servers use specific isolation levels
-    protected virtual IsolationLevel GetTransactionIsolationLevel() {
-      return IsolationLevel.Unspecified; 
     }
 
     public void Close(bool error = false) {
@@ -102,13 +84,13 @@ namespace LockDemo {
       DocHeader doc; 
       if(_useLocks) {
         if(_updating)
-          template = _loadHeaderWithWriteLockTemplate;
+          template = SqlTemplateLoadHeaderWithWriteLock;
         else
-          template = _loadHeaderWithReadLockTemplate;
+          template = SqlTemplateLoadHeaderWithReadLock;
       } else {
-        template = _loadHeaderWithoutLockTemplate;
+        template = SqlTemplateLoadHeaderWithoutLock;
       }
-      using(var reader = ExecuteReader(template, _schemaPrefix, docName)) {
+      using(var reader = ExecuteReader(template, SchemaPrefix, docName)) {
         if(!reader.Read())
           return null;
         doc = new DocHeader() { DocName = docName, Total = ToInt(reader["Total"]) };
@@ -120,29 +102,29 @@ namespace LockDemo {
       const string template =
 @"INSERT INTO {0}""DocHeader"" 
    (""DocName"", ""Total"") VALUES ('{1}', {2})";
-      ExecuteNonQuery(template, _schemaPrefix, docName, 0);
+      ExecuteNonQuery(template, SchemaPrefix, docName, 0);
     }
 
     public void DocHeaderUpdate(string docName, int total) {
       const string template = @"UPDATE {0}""DocHeader"" SET ""Total"" = {2} WHERE ""DocName"" = '{1}'";
-      ExecuteNonQuery(template, _schemaPrefix, docName, total);
+      ExecuteNonQuery(template, SchemaPrefix, docName, total);
     }
 
     public void DocHeaderDelete(string docName) {
       const string template = @"DELETE FROM {0}""DocHeader"" WHERE ""DocName"" = '{1}'";
-      ExecuteNonQuery(template, _schemaPrefix, docName);
+      ExecuteNonQuery(template, SchemaPrefix, docName);
     }
 
     public void DocHeaderDeleteAll() {
       const string template = @"DELETE FROM {0}""DocHeader""";
-      ExecuteNonQuery(template, _schemaPrefix);
+      ExecuteNonQuery(template, SchemaPrefix);
     }
 
     public IList<DocDetail> DocDetailsLoadAll(string docName) {
       var template = @"SELECT ""DocName"", ""Name"", ""Value""
 FROM {0}""DocDetail"" WHERE ""DocName""='{1}'";
       var list = new List<DocDetail>();
-      using(var reader = ExecuteReader(template, _schemaPrefix, docName)) {
+      using(var reader = ExecuteReader(template, SchemaPrefix, docName)) {
         while(reader.Read())
           list.Add(new DocDetail() {
             DocName = docName, Name = (string) reader["Name"], Value = ToInt(reader["Value"]) });
@@ -153,7 +135,7 @@ FROM {0}""DocDetail"" WHERE ""DocName""='{1}'";
     public DocDetail DocDetailLoad(string docName, string name) {
       var template = @"SELECT ""DocName"", ""Name"", ""Value""
 FROM {0}""DocDetail"" WHERE ""DocName""='{1}' AND ""Name"" = '{2}'";
-      using(var reader = ExecuteReader(template, _schemaPrefix, docName, name)) {
+      using(var reader = ExecuteReader(template, SchemaPrefix, docName, name)) {
         if(reader.Read())
           return new DocDetail() {
             DocName = docName, Name = (string)reader["Name"], Value = ToInt(reader["Value"])
@@ -167,46 +149,50 @@ FROM {0}""DocDetail"" WHERE ""DocName""='{1}' AND ""Name"" = '{2}'";
       const string template =
 @"INSERT INTO {0}""DocDetail"" 
    (""DocName"", ""Name"", ""Value"") VALUES ('{1}', '{2}', {3})";
-      ExecuteNonQuery(template, _schemaPrefix, docName, name, value);
+      ExecuteNonQuery(template, SchemaPrefix, docName, name, value);
     }
 
     public void DocDetailUpdate(string docName, string name, int value) {
       const string template = 
 @"UPDATE {0}""DocDetail"" 
     SET ""Value"" = {3} WHERE ""DocName"" = '{1}' AND ""Name"" = '{2}'";
-      ExecuteNonQuery(template, _schemaPrefix, docName, name, value);
+      ExecuteNonQuery(template, SchemaPrefix, docName, name, value);
     }
 
     public void DocDetailDelete(string docName, string name) {
       const string template = @"DELETE FROM {0}""DocDetail""WHERE ""DocName"" = '{1}' AND ""Name"" = '{2}'";
-      ExecuteNonQuery(template, _schemaPrefix, docName, name);
+      ExecuteNonQuery(template, SchemaPrefix, docName, name);
     }
     public void DocDetailDeleteAll() {
       const string template = @"DELETE FROM {0}""DocDetail""";
-      ExecuteNonQuery(template, _schemaPrefix);
+      ExecuteNonQuery(template, SchemaPrefix);
     }
 
-    protected virtual IDataReader ExecuteReader(string sqlTemplate, params object[] values) {
+    private IDataReader ExecuteReader(string sqlTemplate, params object[] values) {
       //We mix thread switching into every operation
       Thread.Yield();
       var cmd = LastCommand = _conn.CreateCommand();
       cmd.Transaction = _trans;
-      cmd.CommandText = string.Format(sqlTemplate, values);
+      cmd.CommandText = PreviewSql(string.Format(sqlTemplate, values));
       Log(cmd.CommandText);
       var reader = cmd.ExecuteReader();
       return reader;
     }
 
-    protected virtual void ExecuteNonQuery(string sqlTemplate, params object[] values) {
+    private void ExecuteNonQuery(string sqlTemplate, params object[] values) {
+      //We mix thread switching into every operation
       Thread.Yield();
       var cmd = LastCommand = _conn.CreateCommand();
       cmd.Transaction = _trans;
-      cmd.CommandText = string.Format(sqlTemplate, values);
+      cmd.CommandText = PreviewSql(string.Format(sqlTemplate, values));
       Log(cmd.CommandText);
       cmd.ExecuteNonQuery();
     }
 
-    //Oracle repo overrides this
+    //Oracle repo overrides these
+    protected virtual string PreviewSql(string sql) {
+      return sql;
+    }
     protected virtual int ToInt(object value) {
       return (int)value;
     }

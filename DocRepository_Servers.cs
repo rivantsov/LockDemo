@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Configuration;
 using System.Data;
 using System.Linq;
 using System.Text;
@@ -8,72 +7,45 @@ using System.Threading.Tasks;
 
 namespace LockDemo {
 
-  public enum ServerType {
-    MsSql,
-    MySql,
-    Postgres,
-    Oracle
-  }
-
   public class MsSqlDocRepository : DocRepository {
-    public MsSqlDocRepository(bool useLocks, string logFile)
-      : base(useLocks, logFile, ServerType.MsSql, 
-          conn: new System.Data.SqlClient.SqlConnection(ConfigurationManager.AppSettings["MsSqlConnectionString"]), 
-          schemaPrefix: "dbo.",
-          loadWithReadLockTemplate: null, //same as load without lock, with snapshot isolation we don't any specific hints
-          loadWithWriteLockTemplate: @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WITH(UpdLock) WHERE ""DocName""='{1}'"
-          ) { }
-
-    protected override IsolationLevel GetTransactionIsolationLevel() {
-      return _updating ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot;
+    public MsSqlDocRepository(string connString, bool useLocks, string logFile)
+                  : base(ServerType.MsSql, new System.Data.SqlClient.SqlConnection(connString), "dbo.", useLocks,logFile) {
+      base.SqlTemplateLoadHeaderWithWriteLock =
+           @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WITH(UpdLock) WHERE ""DocName""='{1}'";
+      base.ReadIsolationLevel = IsolationLevel.Snapshot;
+      base.WriteIsolationLevel = IsolationLevel.ReadCommitted; 
     }
-
   }//class
 
   public class PostgresDocRepository : DocRepository {
-    public PostgresDocRepository(bool useLocks, string logFile)
-      : base(useLocks, logFile, ServerType.Postgres,
-          conn: new Npgsql.NpgsqlConnection(ConfigurationManager.AppSettings["PostgresConnectionString"]),
-          schemaPrefix: "lck.",
-          loadWithReadLockTemplate: @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}' FOR SHARE", 
-          loadWithWriteLockTemplate: @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}' FOR UPDATE"
-          ) { }
-
+    public PostgresDocRepository(string connString, bool useLocks, string logFile)
+                  : base(ServerType.Postgres, new Npgsql.NpgsqlConnection(connString), "lck.", useLocks, logFile) {
+      base.SqlTemplateLoadHeaderWithReadLock = @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}' FOR SHARE";
+      base.SqlTemplateLoadHeaderWithWriteLock = @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}' FOR UPDATE";
+    }
   }//class
 
   public class MySqlDocRepository : DocRepository {
-    public MySqlDocRepository(bool useLocks, string logFile)
-      : base(useLocks, logFile, ServerType.MySql,
-          conn: new MySql.Data.MySqlClient.MySqlConnection(ConfigurationManager.AppSettings["MySqlConnectionString"]),
-          schemaPrefix: "lck.",
-          loadWithReadLockTemplate: @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}' LOCK IN SHARE MODE",
-          loadWithWriteLockTemplate: @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}' FOR UPDATE"
-          ) { }
-
+    public MySqlDocRepository(string connString, bool useLocks, string logFile)
+          : base(ServerType.MySql, new MySql.Data.MySqlClient.MySqlConnection(connString), "lck.", useLocks, logFile) {
+      base.SqlTemplateLoadHeaderWithReadLock = @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}' LOCK IN SHARE MODE";
+      base.SqlTemplateLoadHeaderWithWriteLock = @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}' FOR UPDATE";
+    }
   }//class
 
   public class OracleDocRepository : DocRepository {
-    public OracleDocRepository(bool useLocks, string logFile)
-      : base(useLocks, logFile, ServerType.Oracle,
-          conn: new Oracle.ManagedDataAccess.Client.OracleConnection(ConfigurationManager.AppSettings["OracleConnectionString"]),
-          schemaPrefix: string.Empty,
-          loadWithReadLockTemplate: null, //same as load without lock
-          loadWithWriteLockTemplate: @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}' FOR UPDATE"
-          ) { }
-
-    protected override IsolationLevel GetTransactionIsolationLevel() {
-      // for Oracle - read needs Serializable; with ReadCommitted we get inconsistent read errors
-      return _updating ? IsolationLevel.ReadCommitted : IsolationLevel.Serializable;
+    public OracleDocRepository(string connString, bool useLocks, string logFile)
+      : base(ServerType.Oracle, new Oracle.ManagedDataAccess.Client.OracleConnection(connString), "", useLocks, logFile
+          ) {
+      base.SqlTemplateLoadHeaderWithWriteLock = @"SELECT ""DocName"", ""Total"" FROM {0}""DocHeader"" WHERE ""DocName""='{1}' FOR UPDATE";
+      base.ReadIsolationLevel = IsolationLevel.Serializable;
+      base.WriteIsolationLevel = IsolationLevel.ReadCommitted; 
     }
 
     //Oracle does not like quoted identifiers - it treats quotes as part of names
-    protected override IDataReader ExecuteReader(string sqlTemplate, params object[] values) {
-      return base.ExecuteReader(sqlTemplate.Replace("\"", string.Empty), values);
+    protected override string PreviewSql(string sql) {
+      return sql.Replace("\"", string.Empty);
     }
-    protected override void ExecuteNonQuery(string sqlTemplate, params object[] values) {
-      base.ExecuteNonQuery(sqlTemplate.Replace("\"", string.Empty), values);
-    }
-
     //Oracle uses/returns decimals in int columns
     protected override int ToInt(object value) {
       return (int)Convert.ChangeType(value, typeof(int));
