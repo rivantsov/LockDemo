@@ -3,11 +3,10 @@ This small application is a sample code for the (upcoming) article about using d
 Before you run the application, you need to prepare the database:
 * Choose a server type and create LockTest database on (local) target server. (For MySql and Oracle - skip this, choose the target server installation)
 * Open SQL Browser app (SQL Management Studio, SQL browser) and run DDL script from DDLscripts folder to create database tables
-* Adjust connection string for target server in the app.config file. 
-* Modify serverType variable variable in Program.cs
-Run the app. Turn on/off 'useLocks' variable and see the effects (errors) on the app execution. 
+* Set ServerType and adjust connection string for target server in the app.config file. 
+Run the app. Try changing 'UseLocks' in app.config and see the effects (errors) on the app execution. 
 
-# What the app is doing
+# What the app is doing  
 The app works with 'documents' consisting of a header record (DocHeader table) and multiple DocDetail records. Each detail row contains 'Value' (int) column. DocHeader has a 'Total' column that is a sum of all values in related detail rows - this is a 'consistency' requirement.
 The app initially creates several documents with multiple detail records each. The test starts 20+ threads, each repeating multple times a random operation over a randomly chosen document. An operation might be one the following: 
 * Update - choose 3 random child detail rows, update them with random value in 'Value' column. Calculate new total and update the header row. 
