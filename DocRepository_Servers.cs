@@ -42,7 +42,7 @@ namespace LockDemo {
       base.WriteIsolationLevel = IsolationLevel.ReadCommitted; 
     }
 
-    //Oracle does not like quoted identifiers - it treats quotes as part of names
+    //Oracle does not like quoted identifiers - it treats double quotes as part of names
     protected override string PreviewSql(string sql) {
       return sql.Replace("\"", string.Empty);
     }

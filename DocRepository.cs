@@ -62,13 +62,20 @@ namespace LockDemo {
       }
     }
 
-    public void Close(bool error = false) {
-      if(_trans != null)
-        if(error)
-          try { _trans.Rollback(); Log("Rollback"); } catch { } 
-        else 
-        { _trans.Commit(); Log("Commit"); }
-      _trans = null;
+    public void Commit() {
+      if (_trans != null) {
+        _trans.Commit();
+        _trans = null;
+        Log("Commit");
+      }
+      _conn.Close(); 
+    }
+
+    public void Rollback() {
+      if(_trans != null) {
+        try { _trans.Rollback(); Log("Rollback"); } catch { }
+        _trans = null;
+      }
       _conn.Close();
     }
 

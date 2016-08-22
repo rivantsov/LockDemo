@@ -40,7 +40,7 @@ namespace LockDemo {
           for(int j = 0; j < 5; j++)
             repo.DocDetailInsert(docName, "V" + j, 0);
         }
-        repo.Close();
+        repo.Commit();
         return true; 
       } catch(Exception ex) {
         Console.WriteLine("InitData error: " + ex.ToString());
@@ -72,7 +72,7 @@ namespace LockDemo {
               // Recalc total and update header
               total = repo.DocDetailsLoadAll(docName).Sum(d => d.Value);
               repo.DocHeaderUpdate(docName, total);
-              repo.Close();
+              repo.Commit();
               break;
 
             case 1: //load doc, verify total
@@ -85,7 +85,7 @@ namespace LockDemo {
                 Console.WriteLine(msg); 
                 repo.Log(msg);
               }
-              repo.Close();
+              repo.Commit();
               break;
           }//switch
         } catch(Exception ex) {
@@ -93,7 +93,7 @@ namespace LockDemo {
           Interlocked.Increment(ref DbErrorCount);
           Console.WriteLine("\r\n--- DB error: " + ex.Message + " (log file: " + repo.LogFile + ")");
           repo.Log("Db error ------------------------------------------------------- \r\n" + ex.ToString() + "\r\n");
-          repo.Close(error: true);
+          repo.Rollback();
         }
       }//for i
 
