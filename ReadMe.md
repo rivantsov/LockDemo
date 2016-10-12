@@ -1,5 +1,9 @@
 ﻿# Database Locking Demo application
-This small application is a sample code for the (upcoming) article about using database locks to ensure consistent loading and update of complex documents in relational databases. The app works several servers: MS SQL Server, MySql, Postgres, Oracle. 
+This small application is a sample code for the article about using database locks to ensure consistent loading and update of complex documents in relational databases. 
+
+[Using locks to manage concurrent access to compound relational documents - for MS SQL and other servers](http://www.codeproject.com/Articles/1117051/Using-locks-to-manage-concurrent-access-to-compoun)
+
+The app works several servers: MS SQL Server, MySql, Postgres, Oracle. 
 Before you run the application, you need to prepare the database:
 * Choose a server type and create LockTest database on (local) target server. (For MySql and Oracle - skip this, choose the target server installation)
 * Open SQL Browser app (SQL Management Studio, SQL browser) and run DDL script from DDLscripts folder to create database tables
